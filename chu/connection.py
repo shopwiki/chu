@@ -150,7 +150,7 @@ class AsyncRabbitConnectionBase(object):
         yield Task(self.ensure_connection)
         kwargs.setdefault('queue', '')
         frame = yield gen.Task(self.channel.queue_declare, **kwargs)
-        logger.info('Queue successfully declared.  Frame returned.')
+        logger.info('Queue (%s) successfully declared.  Frame returned.' % frame.method.queue)
         callback(frame.method.queue)
 
     @gen.engine

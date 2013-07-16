@@ -269,7 +269,7 @@ class AsyncTornadoRPCClient(AsyncRabbitConnectionBase):
         logger.info('Ensuring that an RPC queue has been declared.')
         yield Task(self.ensure_connection)
         if self.rpc_queue:
-            logger.info('The RPC queue is already open.')
+            logger.info('The RPC (%s) queue is already open.' % self.rpc_queue)
             callback()
         else:
             logger.info('Adding callback to list of callbacks '
