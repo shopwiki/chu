@@ -33,7 +33,7 @@ setup(
     author_email='plawson@shopwiki.com',
     url='http://github.com/shopwiki/chu',
     packages=['chu'],
-    install_requires=['tornado', 'pika', 'simplejson'],
+    install_requires=['tornado', 'pika', 'simplejson', 'yieldpoints'],
     classifiers = [
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
