@@ -19,18 +19,22 @@
 
 import pika
 from pika.adapters import TornadoConnection
+from pika.exceptions import AMQPConnectionError
 import uuid
 from threading import Lock
 from functools import partial
+from datetime import timedelta
 
 from tornado import gen
 from tornado.gen import Task, Callback, Wait
 from tornado.ioloop import IOLoop
 from tornado import stack_context
+import yieldpoints
+
+from chu.tests.util import Sleep
 
 import logging
 logger = logging.getLogger(__name__)
-
 
 class AsyncRabbitConnectionBase(object):
     def __init__(self, host, io_loop=None):
@@ -58,10 +62,10 @@ class AsyncRabbitConnectionBase(object):
     @gen.engine
     def ensure_connection(self, callback):
         logger.info('Ensuring that the connection is open.')
-        if not (self.connection
-                and self.connection.is_open
-                and self.channel
-                and self.channel.is_open):
+        if not (self.connection and 
+                self.connection.is_open and 
+                self.channel and 
+                self.channel.is_open):
             logger.info('Adding callback to list of callbacks '
                         'waiting for the connection to be open.')
             self.connection_open_callbacks.append(callback)
@@ -75,6 +79,7 @@ class AsyncRabbitConnectionBase(object):
     
     @gen.engine
     def reconnect(self, callback):
+        logger.info("*" * 80)
         logger.info('Attempting to acquire the connect_lock.')
         if not self.connect_lock.acquire(False):
             logger.info('AsyncRabbitClient.reconnect is already '
@@ -82,22 +87,44 @@ class AsyncRabbitConnectionBase(object):
                         'could not be acquired).')
             callback()
             return
-        
+        # attempts = 0
+        # max_attempts = 5
+        # while attempts < max_attempts:
         try:
             logger.info('AsyncRabbitClient.reconnect attempting to '
                         'connect to host: %s' % self.host,
                         extra={'host': self.host})
 
-            params = pika.ConnectionParameters(host=self.host)
-        
+            params = pika.ConnectionParameters(host=self.host)#,
+                                               #connection_attempts=5,
+                                               #retry_delay=3)
+            
             key = str(uuid.uuid4())
-            TornadoConnection(parameters=params,
+
+            success = False
+            attempts = 1
+            while not success:
+                logger.info("Attempt %s" % attempts)
+            
+                TornadoConnection(parameters=params,
                               custom_ioloop=self.io_loop, 
                               on_open_callback=(yield gen.Callback(key)))
+                            # on_open_callback=self.io_loop.add_timeout(timedelta(seconds=2), partial(gen.Callback, key)))
+            
 
-            logger.info('Waiting for TornadoConnection to return control '
+                logger.info('Waiting for TornadoConnection to return control '
                         'via on_open_callback.')
-            self.connection = yield gen.Wait(key)
+                # self.connection = yield gen.Wait(key)
+                
+                # self.io_loop.add_timeout(
+                #                     timedelta(seconds=2), partial(gen.Wait, key))
+                self.connection = yield yieldpoints.WithTimeout(timedelta(seconds=2), key)
+
+                success = True
+
+            if self.connection:
+                logger.info("Success!")
+                    
             logger.info('Control has been returned.')
             
             logger.info('Opening a channel on the connection.')
@@ -107,16 +134,22 @@ class AsyncRabbitConnectionBase(object):
 
             logger.info('Waiting for connection.channel to return control '
                         'via on_open_callback.')
-            self.channel = yield gen.Wait(key)
+
+            # self.channel = yield gen.Wait(key)
+            self.channel = self.io_loop.add_timeout(
+                                    timedelta(seconds=2), partial(gen.Wait, key))
+
             logger.info('Control has been returned.')
             
             logger.info('Adding callbacks to warn us when the connection '
                         'has been closed and when backpressure is being '
                         'applied.')
+
             self.connection.add_on_close_callback(self.on_connection_closed)
+
             self.connection.add_backpressure_callback(self.on_backpressure)
 
-            self.channel.add_on_close_callback(self.on_channel_closed)
+            # self.channel.add_on_close_callback(self.on_channel_closed)
 
             logger.info('Adding callbacks that are waiting for an open '
                         'connection to the tornado queue.')
@@ -129,20 +162,51 @@ class AsyncRabbitConnectionBase(object):
             logger.critical('An unknown exception was raised when trying '
                             'to open a connection to rabbit: %s' %
                             unicode(e))
+            # attempts += 1
+            # print "Got error on attempt, sleeping for 3 secs"
+            # Sleep(3)
             raise
+
         finally:
             logger.info('Releasing the connect lock.')
             self.connect_lock.release()
             callback()
 
+    @gen.engine
+    def on_connection_open(self, key, callback):
+        self.io_loop.add_timeout(timedelta(seconds=2), gen.Callback(key))
+
+
     def on_backpressure(self):
         logger.warning('AsyncRabbitClient.on_backpressure: backpressure!')
     
-    def on_connection_closed(self, connection):
-        pass
-    
+    @gen.engine
+    def on_connection_closed(self, connection, reply_code, reply_text, callback):
+
+        print "HIT on_connection_closed"
+        logger.warning("HIT on_connection_closed, trying to reconnect")
+        if not self.connection.is_closing:
+            yield gen.Task(self.ensure_connection)
+        # callback()
+        # self.channel = None
+        # self.connection.add_timeout(0.5, self.reconnect)
+        # Sleep(0.5)
+        # yield gen.Task(self.reconnect)
+        # self.connection.add_timeout(3, self.reconnect)
+        # pass
+
+    @gen.engine
     def on_channel_closed(self, *args, **kwargs):
-        pass
+        # print "HIT on_channel_closed"
+        # logger.warning("HIT on_channel_closed, trying to reconnect after 3 secs")
+        # # self.connection.add_timeout(3, self.reconnect)
+        # Sleep(3)
+        # callback((yield gen.Task(self.reconnect)))
+        print "HIT on_channel_closed"
+        logger.warning("HIT on_channel_closed, trying to reconnect")
+        if not self.connection.is_closing:
+            yield gen.Task(self.ensure_connection)
+        # pass
     
     @gen.engine
     def queue_declare(self, callback, **kwargs):

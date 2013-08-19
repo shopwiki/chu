@@ -34,8 +34,18 @@ from pika import ConnectionParameters, BasicProperties
 import json
 import time
 from threading import Event
+from chu.tests.util import Sleep
 
-# All tests expect a local RabbitMQ server to be running
+import logging
+logger = logging.getLogger(__name__)
+
+# All tests expect a local RabbitMQ server to be running ('rabbitmq-server')
+
+# class Sleep(gen.Task):
+#     def __init__(self, delay, *args, **kwargs):
+#         io_loop = IOLoop.current()
+#         super(Sleep, self).__init__(io_loop.add_timeout,
+#                                     timedelta(seconds=delay))
 
 class TestRPCClient(AsyncTestCase):
     
@@ -58,6 +68,42 @@ class TestRPCClient(AsyncTestCase):
         future = yield gen.Task(client.rpc, rpc_request)
 
         response = yield gen.Task(future.get)
+        print response
+        self.stop()
+
+    @gen_wrapper(timeout=15)
+    def test_reconnect(self):
+
+        logger.info("test_reconnect - Creating AsyncTornadoRPCClient")
+        client = AsyncTornadoRPCClient('localhost',
+                                        self.io_loop)
+        logger.info("test_reconnect - Done creating AsyncTornadoRPCClient")
+
+        worker = Worker(exchange='exch',
+                        bindings=['key'],
+                        event_io_loop=self.io_loop)
+        logger.info("test_reconnect - starting worker")
+        worker.start()
+        logger.info("test_reconnect - about to yield worker.listening")
+        listening = yield gen.Task(worker.listening.wait, timeout=3)
+        self.assertTrue(listening)
+        print "Listening"
+        logger.info("test_reconnect - Listening")
+        yield gen.Task(self.io_loop.add_timeout, timedelta(seconds=5))
+        
+        rpc_request = RPCRequest(exchange='exch',
+                                 routing_key='key',
+                                 params=dict(ncc=1701))
+
+        print "Created rpc request %s" % rpc_request
+
+        logger.info("test_reconnect - About to yield future")
+        future = yield gen.Task(client.rpc, rpc_request)
+        logger.info("test_reconnect - Got future %s" % future)
+        print "Got future %s" % future
+
+        response = yield gen.Task(future.get)
+        print response
         
         self.stop()
 
