@@ -29,7 +29,6 @@ from tornado import gen
 from tornado.gen import Task, Callback, Wait
 from tornado.ioloop import IOLoop
 from tornado import stack_context
-import yieldpoints
 
 from chu.tests.util import Sleep
 
@@ -109,16 +108,23 @@ class AsyncRabbitConnectionBase(object):
                 TornadoConnection(parameters=params,
                               custom_ioloop=self.io_loop, 
                               on_open_callback=(yield gen.Callback(key)))
+                
                             # on_open_callback=self.io_loop.add_timeout(timedelta(seconds=2), partial(gen.Callback, key)))
             
 
                 logger.info('Waiting for TornadoConnection to return control '
                         'via on_open_callback.')
-                # self.connection = yield gen.Wait(key)
+                self.connection = yield gen.Wait(key)
                 
                 # self.io_loop.add_timeout(
-                #                     timedelta(seconds=2), partial(gen.Wait, key))
-                self.connection = yield yieldpoints.WithTimeout(timedelta(seconds=2), key)
+                #              timedelta(seconds=2), partial(gen.Wait, key))
+                # self.connection = gen.Task(future.get)
+                # import sys, pprint
+                # import simplejson
+                # pprint.pprint(sys.path)
+                # import yieldpoints
+                # self.connection = yield yieldpoints.WithTimeout(timedelta(seconds=2), key)
+
 
                 success = True
 
