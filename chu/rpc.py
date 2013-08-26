@@ -22,6 +22,7 @@ from functools import partial
 from threading import Lock
 from weakref import WeakValueDictionary
 import numbers
+import time
 import uuid
 
 from tornado import gen
@@ -30,6 +31,7 @@ from tornado.ioloop import IOLoop
 from tornado import stack_context
 
 import pika
+
 import simplejson as json
 
 from chu.connection import AsyncRabbitConnectionBase
@@ -237,6 +239,20 @@ class AsyncTornadoRPCClient(AsyncRabbitConnectionBase):
     def on_closed(self, connection):
         logger.warning('AsyncRabbitClient.on_close: closed!')
         self.rpc_queue = None
+
+    @gen.engine
+    def on_connection_closed(self, connection, reply_code, reply_text):
+        self.io_loop.set_blocking_log_threshold(2)
+        reconnect_attempts = 0
+        logger.critical("Rabbit connection dropped!")
+        if not self.connection.is_closing:
+            while not (self.connection and self.connection.is_open):
+                try:
+                    reconnect_attempts += 1
+                    logger.critical("Attempting reconnect %s" % reconnect_attempts)
+                    yield gen.Task(self.rpc_queue_declare)
+                except pika.exceptions.AMQPConnectionError, e:
+                    time.sleep(1)
 
     @gen.engine
     def rpc_queue_declare(self, callback, **kwargs):
