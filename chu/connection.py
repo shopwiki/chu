@@ -31,6 +31,32 @@ from tornado import stack_context
 import logging
 logger = logging.getLogger(__name__)
 
+class SWTornadoConnection(TornadoConnection):
+    def _check_state_on_disconnect(self):
+        """Checks to see if we were in opening a connection with RabbitMQ when
+        we were disconnected and raises exceptions for the anticipated
+        exception types.
+
+        """
+        if self.connection_state == self.CONNECTION_PROTOCOL:
+            logger.error('Incompatible Protocol Versions')
+            logger.error('Man, what even IS this?')
+            # raise pika.exceptions.IncompatibleProtocolError
+            pass
+        elif self.connection_state == self.CONNECTION_START:
+            logger.error("Socket closed while authenticating indicating a "
+                         "probable authentication error")
+            raise pika.exceptions.ProbableAuthenticationError
+        elif self.connection_state == self.CONNECTION_TUNE:
+            logger.error("Socket closed while tuning the connection indicating "
+                         "a probable permission error when accessing a virtual "
+                         "host")
+            raise pika.exceptions.ProbableAccessDeniedError
+        elif self.is_open:
+            logger.warning("Socket closed when connection was open")
+        elif not self.is_closed:
+            logger.warning('Unknown state on disconnect: %i',
+                           self.connection_state)
 
 class AsyncRabbitConnectionBase(object):
     def __init__(self, host, io_loop=None):
@@ -91,7 +117,7 @@ class AsyncRabbitConnectionBase(object):
             params = pika.ConnectionParameters(host=self.host)
         
             key = str(uuid.uuid4())
-            TornadoConnection(parameters=params,
+            SWTornadoConnection(parameters=params,
                               custom_ioloop=self.io_loop, 
                               on_open_callback=(yield gen.Callback(key)))
 
