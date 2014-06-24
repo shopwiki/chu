@@ -251,8 +251,13 @@ class AsyncTornadoRPCClient(AsyncRabbitConnectionBase):
                     reconnect_attempts += 1
                     logger.critical("Attempting reconnect %s" % reconnect_attempts)
                     yield gen.Task(self.rpc_queue_declare)
-                except pika.exceptions.AMQPConnectionError, e:
+                except (pika.exceptions.AMQPConnectionError, pika.exceptions.IncompatibleProtocolError) as e:
+                    logger.critical(e)
                     time.sleep(1)
+                except Exception, e:
+                    logger.critical(e)
+                    time.sleep(1)
+                    raise
 
     @gen.engine
     def rpc_queue_declare(self, callback, **kwargs):

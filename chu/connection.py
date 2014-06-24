@@ -22,6 +22,7 @@ from pika.adapters import TornadoConnection
 import uuid
 from threading import Lock
 from functools import partial
+import time
 
 from tornado import gen
 from tornado.gen import Task, Callback, Wait
@@ -32,31 +33,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SWTornadoConnection(TornadoConnection):
-    def _check_state_on_disconnect(self):
-        """Checks to see if we were in opening a connection with RabbitMQ when
-        we were disconnected and raises exceptions for the anticipated
-        exception types.
 
+    _connect_times = 0
+
+    def _handle_disconnect(self):
         """
-        if self.connection_state == self.CONNECTION_PROTOCOL:
-            logger.error('Incompatible Protocol Versions')
-            logger.error('Man, what even IS this?')
-            # raise pika.exceptions.IncompatibleProtocolError
+        Called internally when the socket is disconnected already
+        """
+        try:
+            self._adapter_disconnect()
+        except pika.exceptions.IncompatibleProtocolError:
             pass
-        elif self.connection_state == self.CONNECTION_START:
-            logger.error("Socket closed while authenticating indicating a "
-                         "probable authentication error")
-            raise pika.exceptions.ProbableAuthenticationError
-        elif self.connection_state == self.CONNECTION_TUNE:
-            logger.error("Socket closed while tuning the connection indicating "
-                         "a probable permission error when accessing a virtual "
-                         "host")
-            raise pika.exceptions.ProbableAccessDeniedError
-        elif self.is_open:
-            logger.warning("Socket closed when connection was open")
-        elif not self.is_closed:
-            logger.warning('Unknown state on disconnect: %i',
-                           self.connection_state)
+        self._on_connection_closed(None, True)
+        time.sleep(1)
+        self._connect_times += 1
+        logger.error("Trying self.connect() (#%s)" % self._connect_times)
+        self.connect()
 
 class AsyncRabbitConnectionBase(object):
     def __init__(self, host, io_loop=None):
